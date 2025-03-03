@@ -9,6 +9,9 @@ from s3_storage import append_to_mempool, save_published_message, list_s3_files,
 from llm_agent import analyze_messages
 from utils import log_info, log_error, get_timestamp, format_summary
 
+# 启用调试日志
+import logging
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
 class CryptoBot:
     def __init__(self):
@@ -43,23 +46,22 @@ class CryptoBot:
 
     async def update_receive_channels(self, application: Application):
         """动态更新消息接收频道的处理器"""
-        # 移除旧的处理器
+        # 移除旧处理器
         for handler in application.handlers.get(0, []):
-            if isinstance(handler, MessageHandler) and handler.callback == self.receive_message:
+            if isinstance(handler, MessageHandler):
                 application.remove_handler(handler)
                 log_info("已移除旧的消息处理器")
-                break
         
-        # 添加新的处理器
+        # 添加新处理器，监听所有消息
         if self.receive_channels:
             chat_ids = [int(cid) for cid, _ in self.receive_channels]
             log_info(f"注册消息处理器，监控频道: {chat_ids}")
             application.add_handler(
-                MessageHandler(filters.Chat(chat_ids), self.receive_message)
+                MessageHandler(filters.Chat(chat_ids) & filters.Update.MESSAGE, self.receive_message)
             )
             log_info(f"成功注册消息处理器，监控频道: {chat_ids}")
         else:
-            log_info("无监控频道，未注册消息处理器")
+            log_info("无监控频道，未注册处理器")
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示主菜单"""
@@ -343,13 +345,13 @@ class CryptoBot:
                 await update.message.reply_text("无效的用户名，请以 @ 开头")
         context.user_data["action"] = None
 
-    async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """接收并存储群组消息"""
+        async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+            """接收并处理群组/频道消息"""
         chat_id = str(update.message.chat_id)
         message_text = update.message.text or "无文本内容"
         
-        # 记录接收到的消息
-        log_info(f"收到群组消息 - chat_id: {chat_id}, 内容: {message_text[:100]}")
+        # 记录所有接收到的消息
+        log_info(f"收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
         
         # 检查是否为监控频道
         if chat_id not in [cid for cid, _ in self.receive_channels]:
@@ -365,9 +367,7 @@ class CryptoBot:
             "original_link": message_text.split("\n")[-1] if "\n" in message_text else ""
         }
         
-        # 记录处理状态
-        self.update_status(f"运行中 - 处理消息: {message['content'][:20]}...")
-        log_info(f"处理群组消息 - chat_id: {chat_id}, 内容: {message['content'][:100]}")
+        log_info(f"处理消息 - chat_id: {chat_id}, 内容: {message['content'][:100]}")
         
         # 存储到 S3
         try:
@@ -378,7 +378,6 @@ class CryptoBot:
             await context.bot.send_message(chat_id, f"存储消息失败: {str(e)}")
             return
         
-        # 确认消息已处理
         await context.bot.send_message(chat_id, "消息已接收并存储")
 
     async def summarize_cycle(self, context: ContextTypes.DEFAULT_TYPE):
@@ -421,6 +420,11 @@ class CryptoBot:
         ]
         self.update_status(f"运行中 - 发送审核: {summary[:20]}...")
         await context.bot.send_message(self.review_channel[0], summary, reply_markup=InlineKeyboardMarkup(keyboard))
+    async def debug_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """调试：记录所有接收到的消息"""
+        chat_id = str(update.message.chat_id)
+        message_text = update.message.text or "无文本内容"
+        log_info(f"调试 - 收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
 
 
 def main():
@@ -441,7 +445,9 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    # 调度周期性任务
+    # 调试用全局消息处理器
+    application.add_handler(MessageHandler(filters.ALL, bot.receive_message), group=1)
+
     application.job_queue.run_repeating(
         bot.summarize_cycle,
         interval=bot.summary_cycle * 60,
@@ -449,8 +455,7 @@ def main():
     )
 
     log_info("Bot 开始运行 polling")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, timeout=30)
 
 if __name__ == "__main__":
     main()
