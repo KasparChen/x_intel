@@ -336,8 +336,9 @@ class CryptoBot:
 
     async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """接收并存储消息"""
-        chat_id = update.message.chat_id
-        if str(chat_id) not in [cid for cid, _ in self.receive_channels]:
+        chat_id = str(update.message.chat_id)  # 确保 chat_id 为字符串类型
+        if chat_id not in [cid for cid, _ in self.receive_channels]:
+            log_info(f"消息来自非监控频道: {chat_id}")
             return
         message = {
             "timestamp": get_timestamp(),

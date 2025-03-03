@@ -12,6 +12,7 @@ def save_to_s3(data, folder, filename):
         log_info(f"成功保存到 S3: {key}")
     except Exception as e:
         log_error(f"S3 保存失败: {key}, 错误: {str(e)}")
+        raise  # 抛出异常，便于调试
 
 def load_from_s3(folder, filename):
     try:
@@ -42,6 +43,7 @@ def append_to_mempool(message):
     timestamp = message.get("timestamp", get_timestamp())
     filename = f"{timestamp.replace(' ', '_')}.json"
     save_to_s3(message, "intel_mempool", filename)
+    log_info(f"已追加到 mempool: {filename}")
 
 def save_published_message(message):
     timestamp = get_timestamp()
