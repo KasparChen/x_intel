@@ -20,13 +20,14 @@ class CryptoBot:
         self.review_enabled = self.load_config("review_enabled") if self.load_config("review_enabled") is not None else True
         self.summary_cycle = self.load_config("summary_cycle") or DEFAULT_SUMMARY_CYCLE
         self.last_position = self.load_config("last_position") or "2025-03-03 00:00:00"
+        log_info("Bot 初始化完成，加载配置成功")
 
     def is_admin(self, username):
         """检查用户是否为管理员"""
         return f"@{username}" in self.admins
 
     def update_status(self, status):
-        """更新状态，仅记录到日志和后端"""
+        """更新状态，记录到日志和控制台"""
         log_info(f"Bot 状态: {status}")
         print(f"Bot 状态: {status}")
 
@@ -42,15 +43,23 @@ class CryptoBot:
 
     async def update_receive_channels(self, application: Application):
         """动态更新消息接收频道的处理器"""
+        # 移除旧的处理器
         for handler in application.handlers.get(0, []):
             if isinstance(handler, MessageHandler) and handler.callback == self.receive_message:
                 application.remove_handler(handler)
+                log_info("已移除旧的消息处理器")
                 break
+        
+        # 添加新的处理器
         if self.receive_channels:
+            chat_ids = [int(cid) for cid, _ in self.receive_channels]
+            log_info(f"注册消息处理器，监控频道: {chat_ids}")
             application.add_handler(
-                MessageHandler(filters.Chat([int(cid) for cid, _ in self.receive_channels]), self.receive_message)
+                MessageHandler(filters.Chat(chat_ids), self.receive_message)
             )
-        log_info(f"已更新接收频道: {[cid for cid, _ in self.receive_channels]}")
+            log_info(f"成功注册消息处理器，监控频道: {chat_ids}")
+        else:
+            log_info("无监控频道，未注册消息处理器")
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示主菜单"""
@@ -192,7 +201,7 @@ class CryptoBot:
         """提示增加接收频道"""
         self.update_status("运行中 - 增加接收频道")
         channel_list = "\n".join([f"[{i}] {name}" for i, (_, name) in enumerate(self.receive_channels)])
-        display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请输入新的 channel ID 如: -184301982"
+        display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请输入新的 channel ID 如: -100123456789"
         keyboard = [[InlineKeyboardButton("返回", callback_data="query_receive_channel")]]
         await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data["action"] = "add_receive_channel"
@@ -335,23 +344,42 @@ class CryptoBot:
         context.user_data["action"] = None
 
     async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """接收并存储消息"""
-        chat_id = str(update.message.chat_id)  # 确保 chat_id 为字符串类型
+        """接收并存储群组消息"""
+        chat_id = str(update.message.chat_id)
+        message_text = update.message.text or "无文本内容"
+        
+        # 记录接收到的消息
+        log_info(f"收到群组消息 - chat_id: {chat_id}, 内容: {message_text[:100]}")
+        
+        # 检查是否为监控频道
         if chat_id not in [cid for cid, _ in self.receive_channels]:
-            log_info(f"消息来自非监控频道: {chat_id}")
+            log_info(f"忽略消息 - chat_id: {chat_id} 不在监控列表中")
             return
+        
+        # 构造消息对象
         message = {
             "timestamp": get_timestamp(),
-            "source": update.message.text.split("\n")[0] if "\n" in update.message.text else update.message.text,
-            "content": "\n".join(update.message.text.split("\n")[1:-2]) if "\n" in update.message.text else update.message.text,
-            "attachment_link": update.message.text.split("\n")[-2] if len(update.message.text.split("\n")) > 2 else "",
-            "original_link": update.message.text.split("\n")[-1] if "\n" in update.message.text else ""
+            "chat_id": chat_id,
+            "source": message_text.split("\n")[0] if "\n" in message_text else message_text,
+            "content": message_text,
+            "original_link": message_text.split("\n")[-1] if "\n" in message_text else ""
         }
-        self.update_status(f"运行中 - 接收消息: {message['content'][:20]}...")
-        log_info(f"收到消息: {message['content']} (频道: {chat_id})")
-        append_to_mempool(message)
-        log_info(f"消息已存储到 S3: {message['content'][:20]}...")
-        await context.bot.send_message(chat_id, "已接收消息")
+        
+        # 记录处理状态
+        self.update_status(f"运行中 - 处理消息: {message['content'][:20]}...")
+        log_info(f"处理群组消息 - chat_id: {chat_id}, 内容: {message['content'][:100]}")
+        
+        # 存储到 S3
+        try:
+            append_to_mempool(message)
+            log_info(f"成功存储消息到 S3 - chat_id: {chat_id}, 文件名: {message['timestamp'].replace(' ', '_')}.json")
+        except Exception as e:
+            log_error(f"存储消息到 S3 失败 - chat_id: {chat_id}, 错误: {str(e)}")
+            await context.bot.send_message(chat_id, f"存储消息失败: {str(e)}")
+            return
+        
+        # 确认消息已处理
+        await context.bot.send_message(chat_id, "消息已接收并存储")
 
     async def summarize_cycle(self, context: ContextTypes.DEFAULT_TYPE):
         """周期性总结消息"""
@@ -400,11 +428,10 @@ def main():
     bot = CryptoBot()
     bot.update_status("Bot 启动")
 
-    # 定义 post_init 回调
     async def post_init(application):
         await bot.update_receive_channels(application)
+        log_info("Bot 初始化完成，消息处理器已注册")
 
-    # 使用 ApplicationBuilder 设置 post_init
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # 添加处理器
@@ -421,7 +448,7 @@ def main():
         first=0
     )
 
-    # 运行 polling
+    log_info("Bot 开始运行 polling")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
