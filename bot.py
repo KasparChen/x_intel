@@ -401,22 +401,27 @@ def main():
 
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
+    # 添加处理器
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("get_id", bot.get_id))
     application.add_handler(CommandHandler("summarize", bot.summarize))
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    # 同步调用 update_receive_channels（临时改为同步执行）
-    asyncio.get_event_loop().run_until_complete(bot.update_receive_channels(application))
+    # 在 Application 初始化后异步更新接收频道
+    async def post_init(application):
+        await bot.update_receive_channels(application)
 
+    application.post_init(post_init)
+
+    # 调度周期性任务
     application.job_queue.run_repeating(
         bot.summarize_cycle,
         interval=bot.summary_cycle * 60,
         first=0
     )
 
-    # 直接运行 polling，不用 asyncio.run
+    # 运行 polling
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
