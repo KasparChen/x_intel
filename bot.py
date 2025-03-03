@@ -399,7 +399,12 @@ def main():
     bot = CryptoBot()
     bot.update_status("Bot 启动")
 
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    # 定义 post_init 回调
+    async def post_init(application):
+        await bot.update_receive_channels(application)
+
+    # 使用 ApplicationBuilder 设置 post_init
+    application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     # 添加处理器
     application.add_handler(CommandHandler("start", bot.start))
@@ -407,12 +412,6 @@ def main():
     application.add_handler(CommandHandler("summarize", bot.summarize))
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
-
-    # 在 Application 初始化后异步更新接收频道
-    async def post_init(application):
-        await bot.update_receive_channels(application)
-
-    application.post_init(post_init)
 
     # 调度周期性任务
     application.job_queue.run_repeating(
