@@ -341,10 +341,10 @@ class CryptoBot:
             return
         message = {
             "timestamp": get_timestamp(),
-            "source": update.message.text.split("\n")[0],
-            "content": "\n".join(update.message.text.split("\n")[1:-2]),
-            "attachment_link": update.message.text.split("\n")[-2],
-            "original_link": update.message.text.split("\n")[-1]
+            "source": update.message.text.split("\n")[0] if "\n" in update.message.text else update.message.text,
+            "content": "\n".join(update.message.text.split("\n")[1:-2]) if "\n" in update.message.text else update.message.text,
+            "attachment_link": update.message.text.split("\n")[-2] if len(update.message.text.split("\n")) > 2 else "",
+            "original_link": update.message.text.split("\n")[-1] if "\n" in update.message.text else ""
         }
         self.update_status(f"运行中 - 接收消息: {message['content'][:20]}...")
         log_info(f"收到消息: {message['content']} (频道: {chat_id})")
@@ -394,8 +394,8 @@ class CryptoBot:
         await context.bot.send_message(self.review_channel[0], summary, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-def main():
-    """启动 Bot"""
+async def main():
+    """异步启动 Bot"""
     bot = CryptoBot()
     bot.update_status("Bot 启动")
 
@@ -407,7 +407,7 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    bot.update_receive_channels(application)  # 确保初始化时加载频道
+    await bot.update_receive_channels(application)  # 异步初始化频道处理器
 
     application.job_queue.run_repeating(
         bot.summarize_cycle,
@@ -415,8 +415,8 @@ def main():
         first=0
     )
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
