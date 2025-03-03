@@ -16,14 +16,19 @@ logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %
 class CryptoBot:
     def __init__(self):
         """初始化 Bot 配置，从 S3 加载持久化数据"""
-        self.admins = self.load_config("admins") or ADMIN_HANDLES
-        self.receive_channels = self.load_config("receive_channels") or []
-        self.review_channel = self.load_config("review_channel")
-        self.publish_channel = self.load_config("publish_channel")
-        self.review_enabled = self.load_config("review_enabled") if self.load_config("review_enabled") is not None else True
-        self.summary_cycle = self.load_config("summary_cycle") or DEFAULT_SUMMARY_CYCLE
-        self.last_position = self.load_config("last_position") or "2025-03-03 00:00:00"
-        log_info("Bot 初始化完成，加载配置成功")
+        log_info("开始初始化 CryptoBot")
+        try:
+            self.admins = self.load_config("admins") or ADMIN_HANDLES
+            self.receive_channels = self.load_config("receive_channels") or []
+            self.review_channel = self.load_config("review_channel")
+            self.publish_channel = self.load_config("publish_channel")
+            self.review_enabled = self.load_config("review_enabled") if self.load_config("review_enabled") is not None else True
+            self.summary_cycle = self.load_config("summary_cycle") or DEFAULT_SUMMARY_CYCLE
+            self.last_position = self.load_config("last_position") or "2025-03-03 00:00:00"
+            log_info("CryptoBot 初始化完成")
+        except Exception as e:
+            log_error(f"CryptoBot 初始化失败: {str(e)}")
+            raise
 
     def is_admin(self, username):
         """检查用户是否为管理员"""
@@ -36,17 +41,25 @@ class CryptoBot:
 
     def load_config(self, key):
         """从 S3 加载配置"""
-        data = load_from_s3("config", f"{key}.json")
-        return data.get("value") if data else None
+        try:
+            data = load_from_s3("config", f"{key}.json")
+            return data.get("value") if data else None
+        except Exception as e:
+            log_error(f"加载 S3 配置失败 ({key}): {str(e)}")
+            return None
 
     def save_config(self, key, value):
         """保存配置到 S3"""
-        save_to_s3({"value": value}, "config", f"{key}.json")
-        log_info(f"配置保存: {key} = {value}")
+        try:
+            save_to_s3({"value": value}, "config", f"{key}.json")
+            log_info(f"配置保存: {key} = {value}")
+        except Exception as e:
+            log_error(f"保存 S3 配置失败 ({key}): {str(e)}")
 
     async def update_receive_channels(self, application: Application):
         """动态更新消息接收频道的处理器"""
         try:
+            log_info("开始更新消息处理器")
             for handler in application.handlers.get(0, []):
                 if isinstance(handler, MessageHandler):
                     application.remove_handler(handler)
@@ -350,15 +363,12 @@ class CryptoBot:
         chat_id = str(update.message.chat_id)
         message_text = update.message.text or "无文本内容"
         
-        # 记录接收到的消息
         log_info(f"收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
         
-        # 检查是否为监控频道
         if chat_id not in [cid for cid, _ in self.receive_channels]:
             log_info(f"忽略消息 - chat_id: {chat_id} 不在监控列表中")
             return
         
-        # 构造消息对象
         message = {
             "timestamp": get_timestamp(),
             "chat_id": chat_id,
@@ -369,7 +379,6 @@ class CryptoBot:
         
         log_info(f"处理消息 - chat_id: {chat_id}, 内容: {message['content'][:100]}")
         
-        # 存储到 S3
         try:
             append_to_mempool(message)
             log_info(f"成功存储消息到 S3 - chat_id: {chat_id}, 文件名: {message['timestamp'].replace(' ', '_')}.json")
@@ -423,10 +432,12 @@ class CryptoBot:
 
 def main():
     """启动 Bot"""
+    log_info("进入 main 函数")
     bot = CryptoBot()
     bot.update_status("Bot 启动")
 
     async def post_init(application):
+        log_info("进入 post_init")
         try:
             await bot.update_receive_channels(application)
             log_info("Bot 初始化完成，消息处理器已注册")
@@ -435,6 +446,7 @@ def main():
             raise
 
     try:
+        log_info("创建 Application")
         application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
         log_info("Application 创建成功")
 
@@ -444,6 +456,7 @@ def main():
         application.add_handler(CommandHandler("summarize", bot.summarize))
         application.add_handler(CallbackQueryHandler(bot.handle_button))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
+        log_info("处理器添加完成")
 
         # 调度周期性任务
         application.job_queue.run_repeating(
@@ -453,7 +466,6 @@ def main():
         )
         log_info("周期性任务已调度")
 
-        # 启动 polling
         log_info("Bot 开始运行 polling")
         application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, timeout=30)
     except Exception as e:
