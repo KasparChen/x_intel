@@ -54,7 +54,7 @@ class CryptoBot:
             chat_ids = [int(cid) for cid, _ in self.receive_channels]
             log_info(f"注册消息处理器，监控频道: {chat_ids}")
             application.add_handler(
-                MessageHandler(filters.Chat(chat_ids) & filters.Update.MESSAGE, self.receive_message)
+                MessageHandler(filters.Chat(chat_ids), self.receive_message)
             )
             log_info(f"成功注册消息处理器，监控频道: {chat_ids}")
         else:
