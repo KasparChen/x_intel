@@ -16,7 +16,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler("x-intel.log"),
-        logging.StreamHandler()  # 同时输出到控制台
+        logging.StreamHandler()  # 输出到控制台
     ]
 )
 
@@ -41,7 +41,6 @@ class CryptoBot:
 
     def update_status(self, status):
         log_info(f"Bot 状态: {status}")
-        print(f"Bot 状态: {status}")
 
     def load_config(self, key):
         try:
@@ -450,9 +449,4 @@ def main():
         log_error(f"Main 函数执行失败: {str(e)}")
 
 if __name__ == "__main__":
-    # 同步运行 main，确保日志输出
-    try:
-        log_info("启动程序")
-        asyncio.run(main())
-    except Exception as e:
-        log_error(f"asyncio.run 失败: {str(e)}")
+    main()
