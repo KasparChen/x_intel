@@ -11,11 +11,17 @@ from utils import log_info, log_error, get_timestamp, format_summary
 
 # 启用详细调试日志
 import logging
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("x-intel.log"),
+        logging.StreamHandler()  # 同时输出到控制台
+    ]
+)
 
 class CryptoBot:
     def __init__(self):
-        """初始化 Bot 配置，从 S3 加载持久化数据"""
         log_info("开始初始化 CryptoBot")
         try:
             self.admins = self.load_config("admins") or ADMIN_HANDLES
@@ -31,16 +37,13 @@ class CryptoBot:
             raise
 
     def is_admin(self, username):
-        """检查用户是否为管理员"""
         return f"@{username}" in self.admins
 
     def update_status(self, status):
-        """更新状态，记录到日志和控制台"""
         log_info(f"Bot 状态: {status}")
         print(f"Bot 状态: {status}")
 
     def load_config(self, key):
-        """从 S3 加载配置"""
         try:
             data = load_from_s3("config", f"{key}.json")
             return data.get("value") if data else None
@@ -49,7 +52,6 @@ class CryptoBot:
             return None
 
     def save_config(self, key, value):
-        """保存配置到 S3"""
         try:
             save_to_s3({"value": value}, "config", f"{key}.json")
             log_info(f"配置保存: {key} = {value}")
@@ -57,7 +59,6 @@ class CryptoBot:
             log_error(f"保存 S3 配置失败 ({key}): {str(e)}")
 
     async def update_receive_channels(self, application: Application):
-        """动态更新消息接收频道的处理器"""
         try:
             log_info("开始更新消息处理器")
             for handler in application.handlers.get(0, []):
@@ -78,7 +79,6 @@ class CryptoBot:
             raise
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """显示主菜单"""
         username = update.effective_user.username
         if not self.is_admin(username):
             await update.message.reply_text("无权限，仅限管理员访问")
@@ -99,7 +99,6 @@ class CryptoBot:
             await update.message.reply_text("管理菜单", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def get_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """获取当前群组或频道 ID"""
         chat_id = update.message.chat_id
         self.update_status(f"运行中 - 获取 ID: {chat_id}")
         try:
@@ -109,7 +108,6 @@ class CryptoBot:
             await update.message.reply_text(f"当前群组/频道 ID: {chat_id} (无法获取名称: {str(e)})")
 
     async def summarize(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """主动触发消息总结"""
         username = update.effective_user.username
         if not self.is_admin(username):
             await update.message.reply_text("无权限，仅限管理员访问")
@@ -123,7 +121,6 @@ class CryptoBot:
         await update.message.reply_text("选择总结选项：", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def handle_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """处理按钮点击"""
         query = update.callback_query
         await query.answer()
         data = query.data
@@ -200,7 +197,6 @@ class CryptoBot:
             await query.edit_message_text("已驳回")
 
     async def query_receive_channel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """查询接收频道"""
         self.update_status("运行中 - 查询接收频道")
         channel_list = "\n".join([f"[{i}] {name} ({cid})" for i, (cid, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}"
@@ -213,7 +209,6 @@ class CryptoBot:
         await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def add_receive_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示增加接收频道"""
         self.update_status("运行中 - 增加接收频道")
         channel_list = "\n".join([f"[{i}] {name} ({cid})" for i, (cid, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请输入新的 channel ID 如: -100123456789"
@@ -222,7 +217,6 @@ class CryptoBot:
         context.user_data["action"] = "add_receive_channel"
 
     async def remove_receive_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示移除接收频道"""
         self.update_status("运行中 - 移除接收频道")
         channel_list = "\n".join([f"[{i}] {name} ({cid})" for i, (cid, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请选择要移除的监控频道编号"
@@ -235,7 +229,6 @@ class CryptoBot:
         await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def query_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """查询管理员"""
         self.update_status("运行中 - 查询管理员")
         admin_list = "\n".join([f"[{i}] {admin}" for i, admin in enumerate(self.admins)])
         display_text = f"当前管理员为：\n{admin_list}"
@@ -248,7 +241,6 @@ class CryptoBot:
         await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def add_admin_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示增加管理员"""
         self.update_status("运行中 - 增加管理员")
         admin_list = "\n".join([f"[{i}] {admin}" for i, admin in enumerate(self.admins)])
         display_text = f"当前管理员为：\n{admin_list}\n请输入新的管理员用户名（如 @username）"
@@ -257,7 +249,6 @@ class CryptoBot:
         context.user_data["action"] = "add_admin"
 
     async def remove_admin_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示移除管理员"""
         self.update_status("运行中 - 移除管理员")
         admin_list = "\n".join([f"[{i}] {admin}" for i, admin in enumerate(self.admins)])
         display_text = f"当前管理员为：\n{admin_list}\n请选择要移除的管理员编号"
@@ -270,7 +261,6 @@ class CryptoBot:
         await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def set_review_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示设置审核频道"""
         self.update_status("运行中 - 设置审核频道")
         review_display = f"{self.review_channel[1]}({self.review_channel[0]})" if self.review_channel else "未设置"
         display_text = f"当前审核频道：{review_display}\n如需更改，请输入新审核频道 ID进行覆盖"
@@ -279,7 +269,6 @@ class CryptoBot:
         context.user_data["action"] = "set_review_channel"
 
     async def set_publish_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示设置发布频道"""
         self.update_status("运行中 - 设置发布频道")
         publish_display = f"{self.publish_channel[1]}({self.publish_channel[0]})" if self.publish_channel else "未设置"
         display_text = f"当前发布频道：{publish_display}\n如需更改，请输入新发布频道 ID进行覆盖"
@@ -288,7 +277,6 @@ class CryptoBot:
         context.user_data["action"] = "set_publish_channel"
 
     async def set_cycle_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """提示设置总结周期"""
         self.update_status("运行中 - 设置周期")
         display_text = f"当前总结周期：{self.summary_cycle} 分钟\n请输入新的总结周期（分钟）"
         keyboard = [[InlineKeyboardButton("返回", callback_data="back")]]
@@ -296,7 +284,6 @@ class CryptoBot:
         context.user_data["action"] = "set_cycle"
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """处理用户输入"""
         username = update.effective_user.username
         if not self.is_admin(username):
             await update.message.reply_text("无权限，仅限管理员访问")
@@ -359,16 +346,12 @@ class CryptoBot:
         context.user_data["action"] = None
 
     async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """接收并处理群组/频道消息"""
         chat_id = str(update.message.chat_id)
         message_text = update.message.text or "无文本内容"
-        
         log_info(f"收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
-        
         if chat_id not in [cid for cid, _ in self.receive_channels]:
             log_info(f"忽略消息 - chat_id: {chat_id} 不在监控列表中")
             return
-        
         message = {
             "timestamp": get_timestamp(),
             "chat_id": chat_id,
@@ -376,9 +359,7 @@ class CryptoBot:
             "content": message_text,
             "original_link": message_text.split("\n")[-1] if "\n" in message_text else ""
         }
-        
         log_info(f"处理消息 - chat_id: {chat_id}, 内容: {message['content'][:100]}")
-        
         try:
             append_to_mempool(message)
             log_info(f"成功存储消息到 S3 - chat_id: {chat_id}, 文件名: {message['timestamp'].replace(' ', '_')}.json")
@@ -386,11 +367,9 @@ class CryptoBot:
             log_error(f"存储消息到 S3 失败 - chat_id: {chat_id}, 错误: {str(e)}")
             await context.bot.send_message(chat_id, f"存储消息失败: {str(e)}")
             return
-        
         await context.bot.send_message(chat_id, "消息已接收并存储")
 
     async def summarize_cycle(self, context: ContextTypes.DEFAULT_TYPE):
-        """周期性总结消息"""
         self.update_status("运行中 - 周期性总结")
         messages = self.get_new_messages()
         if not messages:
@@ -409,7 +388,6 @@ class CryptoBot:
         log_info(f"总结完成，位置: {self.last_position}")
 
     def get_new_messages(self):
-        """从 S3 获取新消息"""
         files = list_s3_files("intel_mempool", self.last_position)
         messages = []
         for timestamp, key in files:
@@ -420,7 +398,6 @@ class CryptoBot:
         return messages
 
     async def send_review(self, context, summary):
-        """发送消息到审核频道"""
         key = f"approve_{summary[:10]}"
         context.bot_data[key] = summary
         keyboard = [
@@ -431,10 +408,13 @@ class CryptoBot:
         await context.bot.send_message(self.review_channel[0], summary, reply_markup=InlineKeyboardMarkup(keyboard))
 
 def main():
-    """启动 Bot"""
     log_info("进入 main 函数")
-    bot = CryptoBot()
-    bot.update_status("Bot 启动")
+    try:
+        bot = CryptoBot()
+        bot.update_status("Bot 启动")
+    except Exception as e:
+        log_error(f"创建 CryptoBot 实例失败: {str(e)}")
+        return
 
     async def post_init(application):
         log_info("进入 post_init")
@@ -450,7 +430,6 @@ def main():
         application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
         log_info("Application 创建成功")
 
-        # 添加命令和处理器
         application.add_handler(CommandHandler("start", bot.start))
         application.add_handler(CommandHandler("get_id", bot.get_id))
         application.add_handler(CommandHandler("summarize", bot.summarize))
@@ -458,7 +437,6 @@ def main():
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
         log_info("处理器添加完成")
 
-        # 调度周期性任务
         application.job_queue.run_repeating(
             bot.summarize_cycle,
             interval=bot.summary_cycle * 60,
@@ -472,4 +450,9 @@ def main():
         log_error(f"Main 函数执行失败: {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    # 同步运行 main，确保日志输出
+    try:
+        log_info("启动程序")
+        asyncio.run(main())
+    except Exception as e:
+        log_error(f"asyncio.run 失败: {str(e)}")
