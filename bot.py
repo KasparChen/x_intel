@@ -9,7 +9,7 @@ from s3_storage import append_to_mempool, save_published_message, list_s3_files,
 from llm_agent import analyze_messages
 from utils import log_info, log_error, get_timestamp, format_summary
 
-# 启用详细调试日志
+# 启用详细调试日志，确保输出到控制台和文件
 import logging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -67,6 +67,7 @@ class CryptoBot:
             if self.receive_channels:
                 chat_ids = [int(cid) for cid, _ in self.receive_channels]
                 log_info(f"注册消息处理器，监控频道: {chat_ids}")
+                # 使用 filters.ALL 捕获所有更新类型
                 application.add_handler(
                     MessageHandler(filters.Chat(chat_ids), self.receive_message)
                 )
@@ -345,9 +346,20 @@ class CryptoBot:
         context.user_data["action"] = None
 
     async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        chat_id = str(update.message.chat_id)
-        message_text = update.message.text or "无文本内容"
-        log_info(f"收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
+        # 处理群组消息或频道消息
+        if update.message:
+            chat_id = str(update.message.chat_id)
+            message_text = update.message.text or "无文本内容"
+            chat_type = update.message.chat.type
+        elif update.channel_post:
+            chat_id = str(update.channel_post.chat_id)
+            message_text = update.channel_post.text or "无文本内容"
+            chat_type = "channel"
+        else:
+            log_info(f"收到非消息更新: {update.to_dict()}")
+            return
+
+        log_info(f"收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {chat_type}")
         if chat_id not in [cid for cid, _ in self.receive_channels]:
             log_info(f"忽略消息 - chat_id: {chat_id} 不在监控列表中")
             return
