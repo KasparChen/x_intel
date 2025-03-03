@@ -15,12 +15,11 @@ class CryptoBot:
         """初始化 Bot 配置，从 S3 加载持久化数据"""
         self.admins = self.load_config("admins") or ADMIN_HANDLES
         self.receive_channels = self.load_config("receive_channels") or []  # (chat_id, name) 元组
-        self.review_channel = self.load_config("review_channel")  # str
-        self.publish_channel = self.load_config("publish_channel")  # str
+        self.review_channel = self.load_config("review_channel")  # (chat_id, name) 元组
+        self.publish_channel = self.load_config("publish_channel")  # (chat_id, name) 元组
         self.review_enabled = self.load_config("review_enabled") if self.load_config("review_enabled") is not None else True
         self.summary_cycle = self.load_config("summary_cycle") or DEFAULT_SUMMARY_CYCLE
         self.last_position = self.load_config("last_position") or "2025-03-03 00:00:00"
-        self.last_message_id = None  # 记录上一条消息 ID
 
     def is_admin(self, username):
         """检查用户是否为管理员"""
@@ -53,15 +52,6 @@ class CryptoBot:
             )
         log_info(f"已更新接收频道: {[cid for cid, _ in self.receive_channels]}")
 
-    async def delete_last_message(self, context: ContextTypes.DEFAULT_TYPE, chat_id):
-        """删除上一条消息"""
-        if self.last_message_id:
-            try:
-                await context.bot.delete_message(chat_id=chat_id, message_id=self.last_message_id)
-            except TelegramError:
-                pass  # 忽略删除失败
-            self.last_message_id = None
-
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示主菜单"""
         username = update.effective_user.username
@@ -78,9 +68,10 @@ class CryptoBot:
              InlineKeyboardButton("设置发布频道", callback_data="set_publish_channel"),
              InlineKeyboardButton("设置周期", callback_data="set_cycle")]
         ]
-        await self.delete_last_message(context, update.message.chat_id)
-        message = await update.message.reply_text("管理菜单", reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        if update.callback_query:  # 从子页面返回
+            await update.callback_query.edit_message_text("管理菜单", reply_markup=InlineKeyboardMarkup(keyboard))
+        else:  # 首次进入
+            await update.message.reply_text("管理菜单", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def get_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """获取当前群组或频道 ID"""
@@ -104,9 +95,7 @@ class CryptoBot:
              InlineKeyboardButton("重置周期计时", callback_data="summarize_reset")],
             [InlineKeyboardButton("返回", callback_data="back")]
         ]
-        await self.delete_last_message(context, update.message.chat_id)
-        message = await update.message.reply_text("选择总结选项：", reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.message.reply_text("选择总结选项：", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def handle_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理按钮点击"""
@@ -134,19 +123,17 @@ class CryptoBot:
                 log_info(f"已移除接收频道: {chat_id} ({name})")
                 await query.message.reply_text(f"已解除 {name}({chat_id}) 的监控任务")
                 await self.update_receive_channels(context.application)
-            await self.query_receive_channel(update, context)  # 刷新
+            await self.query_receive_channel(update, context)
         elif data == "enable_review":
             self.review_enabled = True
             self.save_config("review_enabled", True)
             log_info("审核已开启")
-            await query.edit_message_text("审核已开启")
-            await self.start(update, context)  # 刷新主菜单
+            await self.start(update, context)
         elif data == "disable_review":
             self.review_enabled = False
             self.save_config("review_enabled", False)
             log_info("审核已关闭")
-            await query.edit_message_text("审核已关闭")
-            await self.start(update, context)  # 刷新主菜单
+            await self.start(update, context)
         elif data == "query_admin":
             await self.query_admin(update, context)
         elif data == "add_admin":
@@ -160,7 +147,7 @@ class CryptoBot:
                 self.save_config("admins", self.admins)
                 log_info(f"已移除管理员: {admin}")
                 await query.message.reply_text(f"已移除管理员: {admin}")
-            await self.query_admin(update, context)  # 刷新
+            await self.query_admin(update, context)
         elif data == "set_review_channel":
             await self.set_review_channel_prompt(update, context)
         elif data == "set_publish_channel":
@@ -169,19 +156,19 @@ class CryptoBot:
             await self.set_cycle_prompt(update, context)
         elif data == "summarize_no_reset":
             await self.summarize_cycle(context)
-            await query.edit_message_text("总结完成，未重置周期计时")
+            await query.message.reply_text("总结完成，未重置周期计时")
             await self.start(update, context)
         elif data == "summarize_reset":
             await self.summarize_cycle(context)
             context.job_queue.run_repeating(self.summarize_cycle, interval=self.summary_cycle * 60, first=0)
-            await query.edit_message_text("总结完成，已重置周期计时")
+            await query.message.reply_text("总结完成，已重置周期计时")
             await self.start(update, context)
         elif data == "back":
             await self.start(update, context)
         elif data.startswith("approve_"):
             summary = context.bot_data.get(data)
             if summary and self.publish_channel:
-                await context.bot.send_message(self.publish_channel, summary)
+                await context.bot.send_message(self.publish_channel[0], summary)
                 save_published_message({"content": summary, "timestamp": get_timestamp()})
                 log_info(f"审核通过并发布: {summary[:20]}...")
             await query.edit_message_text("已通过并发布")
@@ -199,9 +186,7 @@ class CryptoBot:
             [InlineKeyboardButton("刷新", callback_data="query_receive_channel")],
             [InlineKeyboardButton("返回", callback_data="back")]
         ]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def add_receive_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """提示增加接收频道"""
@@ -209,9 +194,7 @@ class CryptoBot:
         channel_list = "\n".join([f"[{i}] {name}" for i, (_, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请输入新的 channel ID 如: -184301982"
         keyboard = [[InlineKeyboardButton("返回", callback_data="query_receive_channel")]]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data["action"] = "add_receive_channel"
 
     async def remove_receive_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -225,9 +208,7 @@ class CryptoBot:
             keyboard.append(buttons)
         keyboard.append([InlineKeyboardButton("刷新", callback_data="remove_receive_channel")])
         keyboard.append([InlineKeyboardButton("返回", callback_data="query_receive_channel")])
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def query_admin(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """查询管理员"""
@@ -240,9 +221,7 @@ class CryptoBot:
             [InlineKeyboardButton("刷新", callback_data="query_admin")],
             [InlineKeyboardButton("返回", callback_data="back")]
         ]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def add_admin_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """提示增加管理员"""
@@ -250,9 +229,7 @@ class CryptoBot:
         admin_list = "\n".join([f"[{i}] {admin}" for i, admin in enumerate(self.admins)])
         display_text = f"当前管理员为：\n{admin_list}\n请输入新的管理员用户名（如 @username）"
         keyboard = [[InlineKeyboardButton("返回", callback_data="query_admin")]]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data["action"] = "add_admin"
 
     async def remove_admin_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -266,9 +243,7 @@ class CryptoBot:
             keyboard.append(buttons)
         keyboard.append([InlineKeyboardButton("刷新", callback_data="remove_admin")])
         keyboard.append([InlineKeyboardButton("返回", callback_data="query_admin")])
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def set_review_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """提示设置审核频道"""
@@ -276,9 +251,7 @@ class CryptoBot:
         review_display = f"{self.review_channel[1]}({self.review_channel[0]})" if self.review_channel else "未设置"
         display_text = f"当前审核频道：{review_display}\n如需更改，请输入新审核频道 ID进行覆盖"
         keyboard = [[InlineKeyboardButton("返回", callback_data="back")]]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data["action"] = "set_review_channel"
 
     async def set_publish_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -287,9 +260,7 @@ class CryptoBot:
         publish_display = f"{self.publish_channel[1]}({self.publish_channel[0]})" if self.publish_channel else "未设置"
         display_text = f"当前发布频道：{publish_display}\n如需更改，请输入新发布频道 ID进行覆盖"
         keyboard = [[InlineKeyboardButton("返回", callback_data="back")]]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data["action"] = "set_publish_channel"
 
     async def set_cycle_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -297,9 +268,7 @@ class CryptoBot:
         self.update_status("运行中 - 设置周期")
         display_text = f"当前总结周期：{self.summary_cycle} 分钟\n请输入新的总结周期（分钟）"
         keyboard = [[InlineKeyboardButton("返回", callback_data="back")]]
-        await self.delete_last_message(context, update.callback_query.message.chat_id)
-        message = await update.callback_query.message.reply_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
-        self.last_message_id = message.message_id
+        await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
         context.user_data["action"] = "set_cycle"
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -322,7 +291,7 @@ class CryptoBot:
                 log_info(f"已添加接收频道: {chat_id} ({channel_name})")
                 await update.message.reply_text(f"{channel_name}({chat_id}) 已纳入监控视野")
                 await self.update_receive_channels(context.application)
-                await self.query_receive_channel(update, context)  # 刷新
+                await self.query_receive_channel(update, context)
             except (ValueError, TelegramError) as e:
                 await update.message.reply_text(f"无效的频道 ID 或获取名称失败: {str(e)}")
         elif action == "set_review_channel":
@@ -378,6 +347,7 @@ class CryptoBot:
             "original_link": update.message.text.split("\n")[-1]
         }
         self.update_status(f"运行中 - 接收消息: {message['content'][:20]}...")
+        log_info(f"收到消息: {message['content']} (频道: {chat_id})")
         append_to_mempool(message)
         log_info(f"消息已存储到 S3: {message['content'][:20]}...")
         await context.bot.send_message(chat_id, "已接收消息")
@@ -437,10 +407,7 @@ def main():
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    if bot.receive_channels:
-        application.add_handler(
-            MessageHandler(filters.Chat([int(cid) for cid, _ in bot.receive_channels]), bot.receive_message)
-        )
+    bot.update_receive_channels(application)  # 确保初始化时加载频道
 
     application.job_queue.run_repeating(
         bot.summarize_cycle,
