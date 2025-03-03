@@ -394,8 +394,8 @@ class CryptoBot:
         await context.bot.send_message(self.review_channel[0], summary, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
-async def main():
-    """异步启动 Bot"""
+def main():
+    """启动 Bot"""
     bot = CryptoBot()
     bot.update_status("Bot 启动")
 
@@ -407,7 +407,8 @@ async def main():
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    await bot.update_receive_channels(application)  # 异步初始化频道处理器
+    # 同步调用 update_receive_channels（临时改为同步执行）
+    asyncio.get_event_loop().run_until_complete(bot.update_receive_channels(application))
 
     application.job_queue.run_repeating(
         bot.summarize_cycle,
@@ -415,8 +416,9 @@ async def main():
         first=0
     )
 
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # 直接运行 polling，不用 asyncio.run
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
