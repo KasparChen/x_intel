@@ -9,7 +9,7 @@ from s3_storage import append_to_mempool, save_published_message, list_s3_files,
 from llm_agent import analyze_messages
 from utils import log_info, log_error, get_timestamp, format_summary
 
-# 启用调试日志
+# 启用详细调试日志
 import logging
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -17,9 +17,9 @@ class CryptoBot:
     def __init__(self):
         """初始化 Bot 配置，从 S3 加载持久化数据"""
         self.admins = self.load_config("admins") or ADMIN_HANDLES
-        self.receive_channels = self.load_config("receive_channels") or []  # (chat_id, name) 元组
-        self.review_channel = self.load_config("review_channel")  # (chat_id, name) 元组
-        self.publish_channel = self.load_config("publish_channel")  # (chat_id, name) 元组
+        self.receive_channels = self.load_config("receive_channels") or []
+        self.review_channel = self.load_config("review_channel")
+        self.publish_channel = self.load_config("publish_channel")
         self.review_enabled = self.load_config("review_enabled") if self.load_config("review_enabled") is not None else True
         self.summary_cycle = self.load_config("summary_cycle") or DEFAULT_SUMMARY_CYCLE
         self.last_position = self.load_config("last_position") or "2025-03-03 00:00:00"
@@ -46,13 +46,10 @@ class CryptoBot:
 
     async def update_receive_channels(self, application: Application):
         """动态更新消息接收频道的处理器"""
-        # 移除旧处理器
         for handler in application.handlers.get(0, []):
             if isinstance(handler, MessageHandler):
                 application.remove_handler(handler)
                 log_info("已移除旧的消息处理器")
-        
-        # 添加新处理器，监听所有消息
         if self.receive_channels:
             chat_ids = [int(cid) for cid, _ in self.receive_channels]
             log_info(f"注册消息处理器，监控频道: {chat_ids}")
@@ -79,9 +76,9 @@ class CryptoBot:
              InlineKeyboardButton("设置发布频道", callback_data="set_publish_channel"),
              InlineKeyboardButton("设置周期", callback_data="set_cycle")]
         ]
-        if update.callback_query:  # 从子页面返回
+        if update.callback_query:
             await update.callback_query.edit_message_text("管理菜单", reply_markup=InlineKeyboardMarkup(keyboard))
-        else:  # 首次进入
+        else:
             await update.message.reply_text("管理菜单", reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def get_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -117,7 +114,6 @@ class CryptoBot:
         if not self.is_admin(username):
             await query.edit_message_text("无权限，仅限管理员访问")
             return
-
         self.update_status(f"运行中 - 处理按钮: {data}")
 
         if data == "query_receive_channel":
@@ -189,7 +185,7 @@ class CryptoBot:
     async def query_receive_channel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """查询接收频道"""
         self.update_status("运行中 - 查询接收频道")
-        channel_list = "\n".join([f"[{i}] {name}" for i, (_, name) in enumerate(self.receive_channels)])
+        channel_list = "\n".join([f"[{i}] {name} ({cid})" for i, (cid, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}"
         keyboard = [
             [InlineKeyboardButton("增加接收频道", callback_data="add_receive_channel"),
@@ -202,7 +198,7 @@ class CryptoBot:
     async def add_receive_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """提示增加接收频道"""
         self.update_status("运行中 - 增加接收频道")
-        channel_list = "\n".join([f"[{i}] {name}" for i, (_, name) in enumerate(self.receive_channels)])
+        channel_list = "\n".join([f"[{i}] {name} ({cid})" for i, (cid, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请输入新的 channel ID 如: -100123456789"
         keyboard = [[InlineKeyboardButton("返回", callback_data="query_receive_channel")]]
         await update.callback_query.edit_message_text(display_text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -211,7 +207,7 @@ class CryptoBot:
     async def remove_receive_channel_prompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """提示移除接收频道"""
         self.update_status("运行中 - 移除接收频道")
-        channel_list = "\n".join([f"[{i}] {name}" for i, (_, name) in enumerate(self.receive_channels)])
+        channel_list = "\n".join([f"[{i}] {name} ({cid})" for i, (cid, name) in enumerate(self.receive_channels)])
         display_text = f"当前正在监控的信息频道为：\n{channel_list if channel_list else '无'}\n请选择要移除的监控频道编号"
         keyboard = []
         if self.receive_channels:
@@ -345,12 +341,12 @@ class CryptoBot:
                 await update.message.reply_text("无效的用户名，请以 @ 开头")
         context.user_data["action"] = None
 
-        async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-            """接收并处理群组/频道消息"""
+    async def receive_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """接收并处理群组/频道消息"""
         chat_id = str(update.message.chat_id)
         message_text = update.message.text or "无文本内容"
         
-        # 记录所有接收到的消息
+        # 记录接收到的消息
         log_info(f"收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
         
         # 检查是否为监控频道
@@ -420,12 +416,6 @@ class CryptoBot:
         ]
         self.update_status(f"运行中 - 发送审核: {summary[:20]}...")
         await context.bot.send_message(self.review_channel[0], summary, reply_markup=InlineKeyboardMarkup(keyboard))
-    async def debug_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """调试：记录所有接收到的消息"""
-        chat_id = str(update.message.chat_id)
-        message_text = update.message.text or "无文本内容"
-        log_info(f"调试 - 收到消息 - chat_id: {chat_id}, 内容: {message_text[:100]}, 类型: {update.message.chat.type}")
-
 
 def main():
     """启动 Bot"""
@@ -438,16 +428,14 @@ def main():
 
     application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
-    # 添加处理器
+    # 添加命令和处理器
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("get_id", bot.get_id))
     application.add_handler(CommandHandler("summarize", bot.summarize))
     application.add_handler(CallbackQueryHandler(bot.handle_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    # 调试用全局消息处理器
-    application.add_handler(MessageHandler(filters.ALL, bot.receive_message), group=1)
-
+    # 调度周期性任务
     application.job_queue.run_repeating(
         bot.summarize_cycle,
         interval=bot.summary_cycle * 60,
