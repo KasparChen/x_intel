@@ -1,0 +1,37 @@
+# 虚拟环境
+venv/
+env/
+
+# Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 环境变量文件
+.env
+
+# 日志文件
+x-intel.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE 相关文件
+.idea/              # PyCharm
+*.vscode/           # VS Code
+*.sublime-project
+*.sublime-workspace
+
+# 构建输出
+dist/
+build/
+*.egg-info/
+
+# 临时文件
+*.swp
+*~
+
+# AWS 相关临时文件（如果有）
+*.aws/
