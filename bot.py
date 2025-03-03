@@ -46,19 +46,23 @@ class CryptoBot:
 
     async def update_receive_channels(self, application: Application):
         """动态更新消息接收频道的处理器"""
-        for handler in application.handlers.get(0, []):
-            if isinstance(handler, MessageHandler):
-                application.remove_handler(handler)
-                log_info("已移除旧的消息处理器")
-        if self.receive_channels:
-            chat_ids = [int(cid) for cid, _ in self.receive_channels]
-            log_info(f"注册消息处理器，监控频道: {chat_ids}")
-            application.add_handler(
-                MessageHandler(filters.Chat(chat_ids), self.receive_message)
-            )
-            log_info(f"成功注册消息处理器，监控频道: {chat_ids}")
-        else:
-            log_info("无监控频道，未注册处理器")
+        try:
+            for handler in application.handlers.get(0, []):
+                if isinstance(handler, MessageHandler):
+                    application.remove_handler(handler)
+                    log_info("已移除旧的消息处理器")
+            if self.receive_channels:
+                chat_ids = [int(cid) for cid, _ in self.receive_channels]
+                log_info(f"注册消息处理器，监控频道: {chat_ids}")
+                application.add_handler(
+                    MessageHandler(filters.Chat(chat_ids), self.receive_message)
+                )
+                log_info(f"成功注册消息处理器，监控频道: {chat_ids}")
+            else:
+                log_info("无监控频道，未注册处理器")
+        except Exception as e:
+            log_error(f"更新消息处理器失败: {str(e)}")
+            raise
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """显示主菜单"""
@@ -423,27 +427,37 @@ def main():
     bot.update_status("Bot 启动")
 
     async def post_init(application):
-        await bot.update_receive_channels(application)
-        log_info("Bot 初始化完成，消息处理器已注册")
+        try:
+            await bot.update_receive_channels(application)
+            log_info("Bot 初始化完成，消息处理器已注册")
+        except Exception as e:
+            log_error(f"Post_init 失败: {str(e)}")
+            raise
 
-    application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    try:
+        application = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+        log_info("Application 创建成功")
 
-    # 添加命令和处理器
-    application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CommandHandler("get_id", bot.get_id))
-    application.add_handler(CommandHandler("summarize", bot.summarize))
-    application.add_handler(CallbackQueryHandler(bot.handle_button))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
+        # 添加命令和处理器
+        application.add_handler(CommandHandler("start", bot.start))
+        application.add_handler(CommandHandler("get_id", bot.get_id))
+        application.add_handler(CommandHandler("summarize", bot.summarize))
+        application.add_handler(CallbackQueryHandler(bot.handle_button))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
 
-    # 调度周期性任务
-    application.job_queue.run_repeating(
-        bot.summarize_cycle,
-        interval=bot.summary_cycle * 60,
-        first=0
-    )
+        # 调度周期性任务
+        application.job_queue.run_repeating(
+            bot.summarize_cycle,
+            interval=bot.summary_cycle * 60,
+            first=0
+        )
+        log_info("周期性任务已调度")
 
-    log_info("Bot 开始运行 polling")
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, timeout=30)
+        # 启动 polling
+        log_info("Bot 开始运行 polling")
+        application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, timeout=30)
+    except Exception as e:
+        log_error(f"Main 函数执行失败: {str(e)}")
 
 if __name__ == "__main__":
     main()
